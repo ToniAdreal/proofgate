@@ -1,0 +1,281 @@
+{
+  "version": "proofgate.report/1",
+  "id": "pr_3d1c31c56d313ecb",
+  "createdAt": "2026-11-20T00:00:00.000Z",
+  "inputText": "Invoice Q-1042 from Acme Studio.\nInvoice date: 2026-11-10.\nPayment due date: 2026-12-10.\nDesign services: 3 units at $2,800 = $9,400.\nThe project lead is Maya Chen.",
+  "inputHash": "3d1c31c56d313ecb3a4a8561dc923aca262870f0b58de007d488412c689a2283",
+  "claims": [
+    {
+      "claim": {
+        "id": "c1",
+        "index": 0,
+        "text": "Invoice Q-1042 from Acme Studio.",
+        "span": [
+          0,
+          32
+        ]
+      },
+      "checks": [
+        {
+          "validator": "arithmetic",
+          "claimId": "c1",
+          "status": "skip",
+          "detail": "No recomputable arithmetic found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "dates",
+          "claimId": "c1",
+          "status": "skip",
+          "detail": "No dates found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "units",
+          "claimId": "c1",
+          "status": "skip",
+          "detail": "No unit conversions found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "citations",
+          "claimId": "c1",
+          "status": "skip",
+          "detail": "No citations or source attributions in this claim.",
+          "evidence": {}
+        }
+      ],
+      "modelOutput": null,
+      "verdict": "PASS",
+      "reasons": [
+        "[R4] All deterministic checks passed and no model objection."
+      ]
+    },
+    {
+      "claim": {
+        "id": "c2",
+        "index": 1,
+        "text": "Invoice date: 2026-11-10.",
+        "span": [
+          33,
+          58
+        ]
+      },
+      "checks": [
+        {
+          "validator": "arithmetic",
+          "claimId": "c2",
+          "status": "skip",
+          "detail": "No recomputable arithmetic found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "dates",
+          "claimId": "c2",
+          "status": "pass",
+          "detail": "Date \"2026-11-10\" is a real calendar date.",
+          "evidence": {
+            "raw": "2026-11-10",
+            "iso": "2026-11-10"
+          }
+        },
+        {
+          "validator": "units",
+          "claimId": "c2",
+          "status": "skip",
+          "detail": "No unit conversions found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "citations",
+          "claimId": "c2",
+          "status": "skip",
+          "detail": "No citations or source attributions in this claim.",
+          "evidence": {}
+        }
+      ],
+      "modelOutput": null,
+      "verdict": "PASS",
+      "reasons": [
+        "[R4] All deterministic checks passed and no model objection."
+      ]
+    },
+    {
+      "claim": {
+        "id": "c3",
+        "index": 2,
+        "text": "Payment due date: 2026-12-10.",
+        "span": [
+          59,
+          88
+        ]
+      },
+      "checks": [
+        {
+          "validator": "arithmetic",
+          "claimId": "c3",
+          "status": "skip",
+          "detail": "No recomputable arithmetic found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "dates",
+          "claimId": "c3",
+          "status": "pass",
+          "detail": "Date \"2026-12-10\" is a real calendar date.",
+          "evidence": {
+            "raw": "2026-12-10",
+            "iso": "2026-12-10"
+          }
+        },
+        {
+          "validator": "units",
+          "claimId": "c3",
+          "status": "skip",
+          "detail": "No unit conversions found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "citations",
+          "claimId": "c3",
+          "status": "skip",
+          "detail": "No citations or source attributions in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "dates",
+          "claimId": "c3",
+          "status": "pass",
+          "detail": "Due date 2026-12-10 is on or after the issue date 2026-11-10.",
+          "evidence": {
+            "kind": "ordering",
+            "issueDate": "2026-11-10",
+            "dueDate": "2026-12-10"
+          }
+        }
+      ],
+      "modelOutput": null,
+      "verdict": "PASS",
+      "reasons": [
+        "[R4] All deterministic checks passed and no model objection."
+      ]
+    },
+    {
+      "claim": {
+        "id": "c4",
+        "index": 3,
+        "text": "Design services: 3 units at $2,800 = $9,400.",
+        "span": [
+          89,
+          133
+        ]
+      },
+      "checks": [
+        {
+          "validator": "arithmetic",
+          "claimId": "c4",
+          "status": "fail",
+          "detail": "Line total 3 × 2800 stated as 9400, recomputed value is 8400.",
+          "evidence": {
+            "kind": "line-total",
+            "qty": 3,
+            "price": 2800,
+            "stated": 9400,
+            "expected": 8400
+          }
+        },
+        {
+          "validator": "dates",
+          "claimId": "c4",
+          "status": "skip",
+          "detail": "No dates found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "units",
+          "claimId": "c4",
+          "status": "skip",
+          "detail": "No unit conversions found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "citations",
+          "claimId": "c4",
+          "status": "skip",
+          "detail": "No citations or source attributions in this claim.",
+          "evidence": {}
+        }
+      ],
+      "modelOutput": {
+        "claimId": "c4",
+        "label": "supports",
+        "confidence": 0.64,
+        "rationale": "Mock pass: no contradiction signals detected in claim shape.",
+        "source": "mock",
+        "modelId": "mock-deterministic-v1"
+      },
+      "verdict": "FAIL",
+      "reasons": [
+        "[R1] arithmetic: Line total 3 × 2800 stated as 9400, recomputed value is 8400."
+      ]
+    },
+    {
+      "claim": {
+        "id": "c5",
+        "index": 4,
+        "text": "The project lead is Maya Chen.",
+        "span": [
+          134,
+          164
+        ]
+      },
+      "checks": [
+        {
+          "validator": "arithmetic",
+          "claimId": "c5",
+          "status": "skip",
+          "detail": "No recomputable arithmetic found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "dates",
+          "claimId": "c5",
+          "status": "skip",
+          "detail": "No dates found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "units",
+          "claimId": "c5",
+          "status": "skip",
+          "detail": "No unit conversions found in this claim.",
+          "evidence": {}
+        },
+        {
+          "validator": "citations",
+          "claimId": "c5",
+          "status": "skip",
+          "detail": "No citations or source attributions in this claim.",
+          "evidence": {}
+        }
+      ],
+      "modelOutput": null,
+      "verdict": "PASS",
+      "reasons": [
+        "[R4] All deterministic checks passed and no model objection."
+      ]
+    }
+  ],
+  "summary": {
+    "totalClaims": 5,
+    "pass": 4,
+    "needsReview": 0,
+    "fail": 1,
+    "overallVerdict": "FAIL"
+  },
+  "engine": {
+    "name": "proofgate-core",
+    "version": "0.1.0"
+  },
+  "contentHash": "db5ccba427cb053320569cffd957c0c537fa6292978381c486d0bb1a21959748"
+}
