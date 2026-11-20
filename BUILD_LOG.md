@@ -211,3 +211,9 @@ What this does and does not show: no HTTP-level error was ever returned — noth
 - Re-run the live smoke (above); then the end-to-end live-adapter run and its processing-mode labelling.
 - Register an App Check provider for the web app (reCAPTCHA) or a debug token for local runs, per SPEC Section 7.
 - Firestore persistence of reports; hosting/deploy of `dist-web/`; public GitHub repo (still not created); demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
+
+## Phase 3b — live smoke re-run by main agent (2026-11-20 ~10:10–10:38 PST)
+- Main agent re-ran `node scripts/live-smoke.mjs` directly. Result: identical failure on every call — adapter attempts AbortError "Timeout has expired." (code 20), raw SDK attempts hit the script's 60000ms cap, both paths (PREFER_ON_DEVICE and ONLY_IN_CLOUD), end-to-end runProofGate failed the same way. No HTTP response was ever received; no App Check / API-key / quota error exists to report.
+- Control probes in the same window: plain HTTPS GET to firebaselogic.googleapis.com and generativelanguage.googleapis.com answered 404 (expected for root) in ~2.1–2.6s. So generic egress works; the hang is specific to the SDK's generateContent request path in this Node environment. Two consecutive runs (subagent + main agent) reproduced it, so a one-off transient is unlikely.
+- Working hypotheses, unverified: (1) @firebase/ai SDK expects a browser environment and stalls in Node; (2) App Check token fetch stalls (console shows the web app's App Check as "Unregistered"). Decisive test: run the built web app in a real browser (user's Chrome) against the live project and observe runtime indicators, inferenceSource, and verdicts.
+- Next step (pending user go-ahead after an approval prompt timed out during this work): create the public GitHub repo, publish dist-web via GitHub Pages, and run the sample verification in Chrome.
