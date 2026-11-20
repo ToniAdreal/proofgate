@@ -178,3 +178,36 @@ dist-web/assets/index-XPNRcse3.js   133.53 kB │ gzip: 34.67 kB
 - No live Firebase project is connected (by design in this phase): the adapter's cloud/on-device calls are real SDK code but have never run against a project. Provisioning a project, pasting its web config into `src/firebase-config.ts`, enabling App Check, and adding Firestore persistence of reports remain open, exactly as SPEC Section 7 describes.
 - The UI was verified by production build + preview smoke test (HTTP 200 for the page and logo assets); a full in-browser click-through of the three screens has not been done in this phase.
 - Public GitHub repo, demo hosting, demo video, and the Devpost submission remain for the submission phase, ahead of the 2026-11-30 14:00 PT deadline.
+
+## 2026-11-20 — Phase 3: live Firebase project wired (proofgate-f1e4d); live smoke blocked on timeouts
+
+### Config wired
+
+- `src/firebase-config.ts`: the null placeholder is replaced with the web config of the live project **proofgate-f1e4d** (the user's own Firebase project, free Spark plan, Google Analytics off). Firebase AI Logic was enabled server-side via the Gemini Developer API at no cost (no Blaze upgrade, no payment details). The header comment now states this honestly, including why a Firebase web config is a public project identifier rather than a secret (it ships in every web bundle; access control is Firebase-side). `isFirebaseConfigured` is unchanged.
+- `src/firebaseAi.ts`: header comment updated to match (a live project is now connected); no code changes.
+- Demo path preserved: the engine still defaults to the MockModelAdapter, `createModelAdapter` still falls back to the mock (with demo labelling) on absent config or init failure, and an explicit null config still forces demo mode. **No test adaptations were needed**: the config/status tests pass explicit configs, and the engine tests never depended on the default config being null.
+
+### Verification (exact commands, real results)
+
+```bash
+npm test            # 69 passed / 0 failed (45 core + 24 UI-logic), unchanged
+npm run build:web   # vite 5.4.21: dist-web/assets/index-CfmRVFFS.js 133.78 kB (gzip 34.83 kB), built in 2.33s
+npx tsc --noEmit    # clean
+npm run build       # tsc -> dist/, clean (feeds the smoke script)
+```
+
+### Live smoke test — BLOCKED, all calls timed out (no HTTP response ever received)
+
+`scripts/live-smoke.mjs` (new, not in the shipped bundle, not run by `npm test`) exercises the repo's own `FirebaseAiAdapter` from the dist build, plus one direct SDK call per path to capture raw response text, max 2 attempts per path. Runtime status reported `configured: true, mode: "firebase"` and the adapter constructed as `firebase-ai-logic`. Every generateContent call then failed the same way, verbatim:
+
+- PREFER_ON_DEVICE path (claim "Design services: 3 units at $2,800 = $9,400.", routed on-device): adapter attempts 1–2 and raw SDK attempts 1–2 all failed — adapter: `name: AbortError | message: Timeout has expired. | code: 20`; raw SDK: `generateContent timed out after 60000ms` (the script's own 60s race).
+- ONLY_IN_CLOUD path (guarantee claim, routed cloud): identical failures, same verbatim errors.
+- End-to-end `runProofGate(INVOICE_SAMPLE, { adapter })` therefore also failed: `name: AbortError | message: Timeout has expired. | code: 20`. No verdicts or processing-mode label could be produced with the live adapter.
+
+What this does and does not show: no HTTP-level error was ever returned — nothing about App Check, API key restrictions, or quota. The failure is at request-completion level (the SDK's internal abort/timeout), and the run window overlapped a sandbox service restart. Post-run probes from the same machine reached `firebaselogic.googleapis.com` and `generativelanguage.googleapis.com` (bare GET → HTTP 404 at root, as expected) and `www.google.com` (200), so egress was up after the run; whether the timeouts were a transient egress interruption during the window or an SDK-in-Node hang is **not** determined. A re-run of `node scripts/live-smoke.mjs` in a fresh session is the next step to distinguish; it was not re-run beyond the 2-attempts-per-path limit. Console-side, the web app's App Check column still shows "Unregistered" (no attestation provider registered yet), which remains a possible factor to check if a re-run returns an HTTP error mentioning App Check.
+
+### What remains
+
+- Re-run the live smoke (above); then the end-to-end live-adapter run and its processing-mode labelling.
+- Register an App Check provider for the web app (reCAPTCHA) or a debug token for local runs, per SPEC Section 7.
+- Firestore persistence of reports; hosting/deploy of `dist-web/`; public GitHub repo (still not created); demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.

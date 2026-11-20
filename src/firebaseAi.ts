@@ -14,7 +14,8 @@
  *    the claim escalates to cloud and the escalation is recorded in the
  *    rationale, per SPEC Section 4, trigger 4.
  *
- * No Firebase project is connected by default (see firebase-config.ts).
+ * A live Firebase project is connected (see firebase-config.ts:
+ * `proofgate-f1e4d`, Spark plan, AI Logic via the Gemini Developer API).
  * `createModelAdapter` returns the deterministic MockModelAdapter
  * whenever no complete config is present, and the returned status says
  * so; the UI labels those runs as demo mode. Nothing in this file
