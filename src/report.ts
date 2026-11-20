@@ -1,12 +1,13 @@
-import { createHash } from "node:crypto";
 import type { ClaimVerdict, ProofReport, ReportSummary } from "./types.js";
 import { overallVerdict } from "./gate.js";
+import { sha256Hex } from "./sha256.js";
 
 export const ENGINE_VERSION = "0.1.0";
 
-export function sha256Hex(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
+// SHA-256 comes from the pure TypeScript implementation in sha256.ts
+// (byte-identical to node:crypto) so reports seal identically in the
+// browser, where node:crypto does not exist.
+export { sha256Hex };
 
 /**
  * Canonical JSON: object keys sorted recursively, arrays kept in order,

@@ -22,3 +22,27 @@ export {
   type RoutingTier,
 } from "./modelAdapter.js";
 export { runProofGate, type EngineOptions } from "./engine.js";
+export { SAMPLES, INVOICE_SAMPLE, SOURCE_TYPES, type SourceType } from "./samples.js";
+export {
+  HISTORY_KEY,
+  deriveReportTitle,
+  makeHistoryEntry,
+  loadHistory,
+  persistHistory,
+  addToHistory,
+  updateHistoryEntry,
+  removeFromHistory,
+  filterHistory,
+  historyStats,
+  compareReplay,
+  processingModeLabel,
+  type HistoryEntry,
+  type HistoryFilter,
+  type HistoryStats,
+  type ReplayComparison,
+  type ClaimComparison,
+  type StorageLike,
+} from "./history.js";
+// Note: the Firebase AI Logic adapter (./firebaseAi.js) and its config
+// (./firebase-config.js) are imported by path from the web layer, so the
+// core entry point stays free of browser/SDK imports.

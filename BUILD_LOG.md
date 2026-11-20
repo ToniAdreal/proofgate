@@ -115,3 +115,66 @@ First run before the two fixes above: 32 passed / 13 failed. After the fixes: **
 - Chrome availability check for Gemini Nano with the documented escalation to cloud when on-device is unavailable; record the escalation in the report.
 - Devpost submission assets: public GitHub repo (not created yet, by design), demo video, and the submission form, ahead of the 2026-11-30 14:00 PT deadline.
 - Known core limitations carried forward (also listed in SPEC.md Section 9): number-words prose is not recomputed, unit coverage is length/mass/storage/time, citation support (vs presence/form) is a model + human question.
+
+## 2026-11-20 — Phase 2: web UI (three screens) + Firebase AI Logic adapter
+
+Built to BRAND_NOTES.md and the Figma spec it summarises (Verification Blue #2457A6, Inter + Noto Sans SC, 240px sidebar, verdict colors kept separate from brand blue). All verdict data in the UI comes from the real core engine; nothing is hard-coded. The known mockup flaw (500 vs 120 jobs) is not replicated: the UI renders only live engine output, and the "Expected Output" panel shows the latest real run or explanatory placeholder text, never invented verdicts.
+
+### What was built
+
+- **Web app** (`index.html`, `web/main.ts`, `web/styles.css`, Vite + TypeScript, plain DOM, no UI kit):
+  - Screen 1 — New Verification: source-type segmented control (AI Answer / Quote / Invoice / Announcement, Invoice preselected), paste area with live claim-extraction count from the real `splitClaims`, Clear / Load sample (loads the per-type sample from `src/samples.ts`; the Invoice sample is the canonical one with the planted arithmetic error), Verify button, 5-step Verification Pipeline panel that advances while the engine runs, Runtime Indicators, and an Expected Output panel fed by the latest real report.
+  - Screen 2 — Proof Report: report header (derived title, source type, created time, processing mode derived from the model outputs actually recorded, seal status from `verifyProofReport`), three verdict summary cards (PASS / NEEDS REVIEW / FAIL counts from `report.summary`), per-claim cards with verdict chip, Evidence box (gate reasons plus the recorded model pass with source and model id), and the deterministic checks list (Arithmetic / Dates / Units / Citations / Numbers) with per-check status chips and recomputed evidence on fail/warn. Export JSON downloads the sealed report; Replay re-runs `runProofGate` on the stored input and shows the claim-by-claim comparison inline.
+  - Screen 3 — History & Replay: reports persist in localStorage via the tested helpers in `src/history.ts`; stats (reports last 30 days, replays run, reports passed) computed from real entries; search plus verdict / source-type / date filters; per-row View (opens the report), Replay (re-runs, compares, and records replay count + match result on the entry), and Delete.
+  - Header uses `brand/logo-lockup.png` (copied to `public/`), favicon is `brand/logo-icon.png`.
+- **Firebase AI Logic adapter** (`src/firebaseAi.ts`): real code path on the Firebase JS SDK 13.4.0 (`firebase/app` + `firebase/ai`), written against the installed SDK's actual typings. Standard claims use a hybrid model with `InferenceMode.PREFER_ON_DEVICE` and `inCloudParams` cloud fallback; the response's `inferenceSource` decides whether the recorded `ModelOutput.source` is `on-device` or `cloud`. Escalated claims (per the existing deterministic `decideRoutingTier`, with the warn flag recomputed from the per-claim validators) use `InferenceMode.ONLY_IN_CLOUD`. If the on-device pass throws, the claim escalates to cloud and the escalation is written into the rationale (SPEC Section 4, trigger 4). Model replies are parsed as structured JSON and validated (`parseModelResponse`); malformed output becomes `uncertain` with the failure recorded, never silently trusted.
+- **Config + honest demo mode** (`src/firebase-config.ts`): `firebaseConfig` is `null` by default; no project, key, or connection is invented anywhere. `createModelAdapter()` returns the Firebase adapter only when a complete config is present and initialises; otherwise it returns `MockModelAdapter`, and the UI labels that state in the top bar, a banner, the Runtime Indicators, and every report's processing mode ("Demo mode (mock model)", derived by `processingModeLabel` from the recorded outputs).
+- **Browser-compatible sealing** (`src/sha256.ts`): `report.ts` no longer imports `node:crypto` (which does not exist in browsers). The pure TypeScript SHA-256 is byte-identical: after rebuilding, `node make-sample.mjs` reproduced `sample-proof-report.json` with the unchanged contentHash `db5ccba427cb053320569cffd957c0c537fa6292978381c486d0bb1a21959748` (git diff on the file: none), and the new tests cross-check the implementation against `node:crypto` and the FIPS known-answer vectors.
+- **Samples** (`src/samples.ts`): one sample per source type; the invoice sample is the canonical test case (3 units at $2,800 = $9,400, recomputed 8,400, must FAIL).
+- **History logic** (`src/history.ts`): storage-agnostic localStorage helpers (load / add with dedupe by content hash / update / remove, corrupt-data tolerant), `filterHistory`, `historyStats`, `compareReplay`, `deriveReportTitle`, `processingModeLabel` — all pure and unit-tested.
+- `package.json`: added `firebase` (^13.4.0) dependency, `vite` (^5.4.21) devDependency, and scripts `dev`, `build:web`, `preview`. `.gitignore` now also ignores `dist-web/`. Note: the first backgrounded `npm install` in this session silently lost its package.json writes (empty package dirs, deps pruned by the next install); the install was redone in the foreground and verified in package.json before proceeding.
+
+### How to run locally
+
+```bash
+cd ~/workspace/web3-bounty-operations/work/buildhybridai/proofgate
+npm install
+npm run dev        # Vite dev server (default http://localhost:5173)
+npm run build:web  # production build -> dist-web/
+npm run preview    # serve the production build (default http://localhost:4173)
+npm test           # full test suite (core + UI logic)
+npm run build      # tsc build of the core engine -> dist/
+```
+
+With no Firebase config present (the default), the app runs in demo mode: deterministic checks are fully real, the model pass is the local mock, and the UI says so.
+
+### Commands run (exact) and real results
+
+```bash
+npm install firebase && npm install -D vite   # firebase 13.4.0, vite 5.4.21 (foreground, verified)
+npx tsc --noEmit                              # clean, including firebaseAi.ts against the SDK typings
+npm test                                      # see below
+npm run build                                 # tsc -> dist/, clean
+node make-sample.mjs                          # overall: FAIL | claims: 5 | fail: 1; contentHash unchanged (above)
+npm run build:web                             # vite build, see below
+npx vite preview --port 4173                  # smoke test: GET / -> 200, GET /logo-icon.png -> 200
+```
+
+Test results (`npm test`, 2026-11-20): **69 passed / 0 failed** — the 45 pre-existing core tests unchanged and passing, plus 24 new tests in `tests/ui-logic.test.ts` covering SHA-256 vectors and node:crypto parity, Firebase config/status honesty, model-response parsing (clean, fenced, clamped, malformed), claim warning detection, history storage round-trip / dedupe / corruption / update / remove, title derivation, history filtering and stats, replay comparison (match, changed verdict, missing claim), processing-mode labels, and the built-in samples (invoice sample produces exactly one arithmetic FAIL and overall FAIL).
+
+Production build (`npm run build:web`, vite 5.4.21):
+
+```
+vite v5.4.21 building for production...
+✓ 31 modules transformed.
+dist-web/index.html                   0.79 kB │ gzip:  0.44 kB
+dist-web/assets/index-BX4I5H05.css   10.16 kB │ gzip:  2.53 kB
+dist-web/assets/index-XPNRcse3.js   133.53 kB │ gzip: 34.67 kB
+✓ built in 770ms
+```
+
+### Open items carried forward
+
+- No live Firebase project is connected (by design in this phase): the adapter's cloud/on-device calls are real SDK code but have never run against a project. Provisioning a project, pasting its web config into `src/firebase-config.ts`, enabling App Check, and adding Firestore persistence of reports remain open, exactly as SPEC Section 7 describes.
+- The UI was verified by production build + preview smoke test (HTTP 200 for the page and logo assets); a full in-browser click-through of the three screens has not been done in this phase.
+- Public GitHub repo, demo hosting, demo video, and the Devpost submission remain for the submission phase, ahead of the 2026-11-30 14:00 PT deadline.
