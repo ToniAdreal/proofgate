@@ -62,7 +62,7 @@ h3 { font-size: 20px; line-height: 28px; font-weight: 700; margin: 0; }
   padding: 0 24px;
   z-index: 20;
 }
-.topbar .lockup { height: 40px; width: auto; display: block; }
+.topbar .lockup { height: 42px; width: auto; display: block; }
 .topbar .spacer { flex: 1; }
 
 .sidebar {
