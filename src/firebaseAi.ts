@@ -29,8 +29,19 @@
  * the pipeline and never fabricates a judgement: the on-device attempt
  * escalates to cloud (recorded), and a failed cloud call returns an
  * explicit model-unavailable output (see modelUnavailableOutput).
+ *
+ * App Check: the AI Logic backend rejects calls whose App Check token
+ * is invalid (observed live as "[401] Firebase App Check token is
+ * invalid"), and this project has no attestation provider registered.
+ * The adapter therefore initialises App Check with the registered
+ * DEBUG token (see appCheckDebugToken in firebase-config.ts and
+ * ensureAppCheck below) before the first model call. That wiring is
+ * browser-only and fully guarded: outside a browser, without a debug
+ * token, or if initialisation throws, it degrades to the same honest
+ * model-unavailable behaviour as any other model failure.
  */
 import { getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
+import { CustomProvider, initializeAppCheck } from "firebase/app-check";
 import {
   getAI,
   getGenerativeModel,
@@ -50,7 +61,7 @@ import { checkArithmetic } from "./validators/arithmetic.js";
 import { checkDates } from "./validators/dates.js";
 import { checkUnits } from "./validators/units.js";
 import { checkCitations } from "./validators/citations.js";
-import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+import { appCheckDebugToken, firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 
 /** Cloud model used for escalations and SDK cloud fallback. */
 export const CLOUD_MODEL_ID = "gemini-2.5-flash";
@@ -182,6 +193,89 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Outcome of an App Check initialisation attempt (see ensureAppCheck). */
+export interface AppCheckInitStatus {
+  outcome:
+    | "initialized"
+    | "already-initialized"
+    | "skipped-not-browser"
+    | "skipped-no-debug-token"
+    | "failed";
+  detail: string;
+}
+
+/** Apps for which ensureAppCheck has already run (the SDK throws on a second initializeAppCheck for the same app). */
+const appCheckAttempted = new WeakSet<FirebaseApp>();
+
+/**
+ * Initialise Firebase App Check for `app` with the registered debug
+ * token, so AI Logic calls carry a valid App Check token.
+ *
+ * How it works: the App Check SDK checks the global
+ * `FIREBASE_APPCHECK_DEBUG_TOKEN` when initializeAppCheck runs; when
+ * it holds a token string, token requests go to the debug-token
+ * exchange endpoint and the configured provider is never consulted
+ * (verified in the bundled @firebase/app-check 0.13.2). The provider
+ * passed here is therefore a CustomProvider whose getToken always
+ * rejects: it exists only because initializeAppCheck requires one,
+ * it makes no network calls, and if the debug global were somehow
+ * absent the rejection surfaces as an ordinary model failure, which
+ * the adapter already records honestly — never as a crash or a hang.
+ *
+ * Guarding: this only runs in a browser (`window` present). Node,
+ * tests, and the live-smoke script skip it entirely, and the mock /
+ * deterministic path never reaches it. Repeat calls for the same app
+ * are no-ops, and any throw is captured into the returned status.
+ */
+export function ensureAppCheck(
+  app: FirebaseApp,
+  debugToken: string | null = appCheckDebugToken,
+): AppCheckInitStatus {
+  if (typeof (globalThis as { window?: unknown }).window === "undefined") {
+    return {
+      outcome: "skipped-not-browser",
+      detail: "App Check is only initialised in the browser build; this environment has no window.",
+    };
+  }
+  if (!debugToken) {
+    return {
+      outcome: "skipped-no-debug-token",
+      detail: "No App Check debug token is configured, so App Check was not initialised.",
+    };
+  }
+  if (appCheckAttempted.has(app)) {
+    return {
+      outcome: "already-initialized",
+      detail: "App Check initialisation was already attempted for this Firebase app.",
+    };
+  }
+  appCheckAttempted.add(app);
+  try {
+    // Must be set before initializeAppCheck: the SDK reads this global
+    // to decide whether to exchange the debug token for App Check
+    // tokens instead of consulting the provider.
+    (globalThis as { FIREBASE_APPCHECK_DEBUG_TOKEN?: string }).FIREBASE_APPCHECK_DEBUG_TOKEN =
+      debugToken;
+    initializeAppCheck(app, {
+      provider: new CustomProvider({
+        getToken: () =>
+          Promise.reject(
+            new Error(
+              "ProofGate demo: App Check exchanges the registered debug token; no attestation provider is configured.",
+            ),
+          ),
+      }),
+      isTokenAutoRefreshEnabled: true,
+    });
+    return {
+      outcome: "initialized",
+      detail: "App Check initialised with the registered debug token for the public demo.",
+    };
+  } catch (err) {
+    return { outcome: "failed", detail: `App Check failed to initialise: ${errorMessage(err)}` };
+  }
+}
+
 /**
  * Production adapter backed by Firebase AI Logic hybrid inference.
  * Construct only with a complete config (see createModelAdapter).
@@ -191,9 +285,15 @@ export class FirebaseAiAdapter implements ModelAdapter {
   private readonly app: FirebaseApp;
   private readonly ai: AI;
   private readonly callTimeoutMs: number;
+  /** App Check initialisation outcome for this adapter's app (diagnostics; never throws). */
+  readonly appCheckInit: AppCheckInitStatus;
 
   constructor(config: FirebaseOptions, options: FirebaseAiAdapterOptions = {}) {
     this.app = getApps().length > 0 ? getApps()[0]! : initializeApp(config);
+    // App Check must be initialised before the first AI Logic call so
+    // the SDK can attach a valid token; ensureAppCheck is guarded and
+    // reports failure instead of throwing.
+    this.appCheckInit = ensureAppCheck(this.app);
     this.ai = getAI(this.app, { backend: new GoogleAIBackend() });
     this.callTimeoutMs = options.callTimeoutMs ?? MODEL_CALL_TIMEOUT_MS;
   }

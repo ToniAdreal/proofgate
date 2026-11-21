@@ -31,6 +31,28 @@ export const firebaseConfig: FirebaseOptions | null = {
   appId: "1:639820381603:web:671e5939afbfd3489f2e16",
 };
 
+/**
+ * Firebase App Check DEBUG token for this web app, registered in the
+ * Firebase console for project `proofgate-f1e4d` (App Check -> Apps ->
+ * ProofGate Web -> debug tokens).
+ *
+ * Why it exists: the project's AI Logic backend rejects model calls
+ * whose App Check token is missing or invalid (observed live as
+ * "[401] Firebase App Check token is invalid"), and no reCAPTCHA
+ * attestation provider is registered for this app. A registered debug
+ * token is the documented way to run App Check from a demo build, and
+ * the #BuildHybridAI event rules accept App Check debug tokens for
+ * demos. `ensureAppCheck` in firebaseAi.ts hands this token to the
+ * App Check SDK (browser only) before any AI Logic call.
+ *
+ * A debug token is NOT a credential: like the web config above, it is
+ * an identifier that ships in the client bundle by design. It grants
+ * no access by itself; it only lets App Check recognise this demo
+ * build when the SDK exchanges it for a real App Check token
+ * server-side.
+ */
+export const appCheckDebugToken: string | null = "9e831732-efd4-481c-85b9-9e9be7db5fb9";
+
 /** True only when a config object carries the fields the SDK requires. */
 export function isFirebaseConfigured(config: FirebaseOptions | null | undefined): boolean {
   return Boolean(

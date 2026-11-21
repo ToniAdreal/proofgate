@@ -310,7 +310,7 @@ function renderApp(): void {
       ${
         status.mode === "mock"
           ? `<span class="chip chip-review">Demo mode (mock model)</span>`
-          : `<span class="chip chip-pass">Firebase AI Logic connected</span>`
+          : `<span class="chip chip-pass">Firebase AI Logic configured</span>`
       }
     </header>
     <nav class="sidebar">
@@ -583,6 +583,7 @@ function renderReport(screen: HTMLElement): void {
         <span class="chip ${sealOk ? "chip-tint" : "chip-fail"}">${sealOk ? "Seal verified (SHA-256)" : "Seal broken"}</span>
         <span class="chip chip-outline mono">${esc(report.id)}</span>
       </div>
+      <div class="small muted mono" style="margin-top:10px; word-break:break-all">Content hash (SHA-256): ${esc(report.contentHash)}</div>
       <div class="summary-grid">
         <div class="summary-card pass"><span class="chip chip-pass">✓ Pass</span><div class="count">${report.summary.pass} claims</div></div>
         <div class="summary-card review"><span class="chip chip-review">⚠ Needs review</span><div class="count">${report.summary.needsReview} claims</div></div>
