@@ -61,11 +61,26 @@ import { checkArithmetic } from "./validators/arithmetic.js";
 import { checkDates } from "./validators/dates.js";
 import { checkUnits } from "./validators/units.js";
 import { checkCitations } from "./validators/citations.js";
-import { appCheckDebugToken, firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
+import {
+  appCheckDebugToken,
+  cloudModel,
+  firebaseConfig,
+  isFirebaseConfigured,
+} from "./firebase-config.js";
 
-/** Cloud model used for escalations and SDK cloud fallback. */
-export const CLOUD_MODEL_ID = "gemini-2.5-flash";
-/** Model id recorded for on-device passes. */
+/**
+ * Cloud model used for escalations and SDK cloud fallback.
+ * The value lives in firebase-config.ts (`cloudModel`) alongside the
+ * other live project settings; this alias keeps the adapter's (and
+ * scripts/live-smoke.mjs's) existing references unchanged.
+ */
+export const CLOUD_MODEL_ID = cloudModel;
+/**
+ * Model id recorded for on-device passes. A reporting label only:
+ * the on-device path passes no model name to the SDK (@firebase/ai's
+ * OnDeviceParams has no model field), because Chrome's built-in
+ * Gemini Nano is selected by the SDK/browser.
+ */
 export const ON_DEVICE_MODEL_ID = "gemini-nano (on-device, via Firebase AI Logic)";
 /**
  * Hard bound on a single generateContent call. The Firebase AI SDK

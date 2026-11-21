@@ -53,6 +53,29 @@ export const firebaseConfig: FirebaseOptions | null = {
  */
 export const appCheckDebugToken: string | null = "9e831732-efd4-481c-85b9-9e9be7db5fb9";
 
+/**
+ * Live cloud model for Firebase AI Logic hybrid inference.
+ *
+ * Used for the in-cloud params of the hybrid model (the SDK's cloud
+ * fallback) and for ONLY_IN_CLOUD escalations in firebaseAi.ts. The
+ * value is the bare model ID that the SDK's `ModelParams.model`
+ * expects (no "models/" prefix), matching how the previous model was
+ * passed.
+ *
+ * History: this was "gemini-2.5-flash" until 2026-11-20, when the
+ * live cloud call (App Check now passing) started failing with
+ * "[404] This model models/gemini-2.5-flash is no longer available
+ * to new users. Please update your code to use
+ * models/gemini-3.8-flash …", so the model was updated to exactly
+ * the ID the API prescribes.
+ *
+ * The on-device path deliberately names no model here: @firebase/ai's
+ * `OnDeviceParams` carries only Prompt API create/prompt options (no
+ * model field), so Chrome's built-in Gemini Nano is selected by the
+ * SDK/browser, not by this app.
+ */
+export const cloudModel: string = "gemini-3.8-flash";
+
 /** True only when a config object carries the fields the SDK requires. */
 export function isFirebaseConfigured(config: FirebaseOptions | null | undefined): boolean {
   return Boolean(
