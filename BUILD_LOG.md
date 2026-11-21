@@ -217,3 +217,11 @@ What this does and does not show: no HTTP-level error was ever returned — noth
 - Control probes in the same window: plain HTTPS GET to firebaselogic.googleapis.com and generativelanguage.googleapis.com answered 404 (expected for root) in ~2.1–2.6s. So generic egress works; the hang is specific to the SDK's generateContent request path in this Node environment. Two consecutive runs (subagent + main agent) reproduced it, so a one-off transient is unlikely.
 - Working hypotheses, unverified: (1) @firebase/ai SDK expects a browser environment and stalls in Node; (2) App Check token fetch stalls (console shows the web app's App Check as "Unregistered"). Decisive test: run the built web app in a real browser (user's Chrome) against the live project and observe runtime indicators, inferenceSource, and verdicts.
 - Next step (pending user go-ahead after an approval prompt timed out during this work): create the public GitHub repo, publish dist-web via GitHub Pages, and run the sample verification in Chrome.
+
+## Phase 4 — public repo + GitHub Pages (2026-11-20)
+- Public GitHub repo created: https://github.com/ToniAdreal/proofgate (description set per submission brief). Local `main` pushed to `origin` (was e334ab4 + 801416a at creation).
+- Pages build: added a separate `build:pages` npm script (`vite build --base=/proofgate/ --outDir dist-pages`); the default `build:web` output and vite config are unchanged. `dist-pages/` added to .gitignore. No application logic changed.
+- Built output published to the `gh-pages` branch (commit 753cd82) and GitHub Pages enabled with source gh-pages / (auto-enabled on branch push; API status reached "built").
+- Live verification from the shell: GET https://toniadreal.github.io/proofgate/ → HTTP 200, HTML title "ProofGate — Verify before you trust", references /proofgate/assets/index-CfmRVFFS.js. GET that bundle → HTTP 200, 133,837 bytes, application/javascript. CSS bundle also HTTP 200.
+- Tests after the change: npm test 69 passed / 0 failed.
+- Note: Pages serves the same build that falls back to the labelled mock adapter unless the live Firebase path works in the visitor's browser; the Node-side live-smoke timeout (phase 3b) is unchanged by this phase. Browser-side live verification is the next step.
