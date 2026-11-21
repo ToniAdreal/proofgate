@@ -1,4 +1,4 @@
-import type { Claim, ModelOutput } from "./types.js";
+import type { Claim, ModelOutput, ModelSource } from "./types.js";
 
 /**
  * Model adapter interface.
@@ -13,6 +13,35 @@ import type { Claim, ModelOutput } from "./types.js";
 export interface ModelAdapter {
   readonly name: string;
   analyze(claim: Claim): Promise<ModelOutput>;
+}
+
+/**
+ * The recorded outcome when a model pass did not complete (timeout or
+ * error): the claim is marked `uncertain` with confidence 0 and the
+ * `failure` field set, so the report shows plainly that NO model
+ * judgement was obtained. This follows the same convention as
+ * parseModelResponse in firebaseAi.ts (unusable model output becomes
+ * `uncertain`, never silently trusted) and lets the deterministic gate
+ * decide the claim on the checks alone (uncertain forces NEEDS REVIEW
+ * unless a hard validator failure already decided it).
+ */
+export function modelUnavailableOutput(
+  claimId: string,
+  source: ModelSource,
+  modelId: string,
+  failure: string,
+): ModelOutput {
+  return {
+    claimId,
+    label: "uncertain",
+    confidence: 0,
+    rationale:
+      `Model pass did not complete (${failure}); no model judgement was obtained, ` +
+      "so this claim is recorded as uncertain and decided by the deterministic checks.",
+    source,
+    modelId,
+    failure,
+  };
 }
 
 /**

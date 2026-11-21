@@ -41,6 +41,13 @@ export interface ModelOutput {
   rationale: string;
   source: ModelSource;
   modelId: string;
+  /**
+   * Set only when the model pass did not complete (timeout or error):
+   * no model judgement was obtained. The label/confidence of such an
+   * output are the recorded-as-uncertain convention, never a real
+   * model answer, and the rationale says so explicitly.
+   */
+  failure?: string;
 }
 
 export interface ClaimVerdict {

@@ -20,6 +20,15 @@
  * whenever no complete config is present, and the returned status says
  * so; the UI labels those runs as demo mode. Nothing in this file
  * invents a project, a key, or a connection state.
+ *
+ * Every generateContent call is wrapped in a hard timeout
+ * (MODEL_CALL_TIMEOUT_MS): the SDK imposes no deadline of its own, and
+ * both of its paths can pend indefinitely (the cloud request can stall
+ * server-side; the on-device path can wait forever on a Chrome-managed
+ * Gemini Nano download). A call that times out or fails never hangs
+ * the pipeline and never fabricates a judgement: the on-device attempt
+ * escalates to cloud (recorded), and a failed cloud call returns an
+ * explicit model-unavailable output (see modelUnavailableOutput).
  */
 import { getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
 import {
@@ -30,7 +39,13 @@ import {
   type AI,
 } from "firebase/ai";
 import type { Claim, ModelOutput, ModelSource } from "./types.js";
-import { MockModelAdapter, decideRoutingTier, type ModelAdapter } from "./modelAdapter.js";
+import {
+  MockModelAdapter,
+  decideRoutingTier,
+  modelUnavailableOutput,
+  type ModelAdapter,
+} from "./modelAdapter.js";
+import { isTimeoutError, withTimeout } from "./timeout.js";
 import { checkArithmetic } from "./validators/arithmetic.js";
 import { checkDates } from "./validators/dates.js";
 import { checkUnits } from "./validators/units.js";
@@ -41,6 +56,17 @@ import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 export const CLOUD_MODEL_ID = "gemini-2.5-flash";
 /** Model id recorded for on-device passes. */
 export const ON_DEVICE_MODEL_ID = "gemini-nano (on-device, via Firebase AI Logic)";
+/**
+ * Hard bound on a single generateContent call. The Firebase AI SDK
+ * sets no deadline; without this, a stalled cloud request or a
+ * never-completing on-device model download hangs the caller forever.
+ */
+export const MODEL_CALL_TIMEOUT_MS = 30_000;
+
+export interface FirebaseAiAdapterOptions {
+  /** Per-call bound (ms) on generateContent. Defaults to MODEL_CALL_TIMEOUT_MS. */
+  callTimeoutMs?: number;
+}
 
 export interface FirebaseRuntimeStatus {
   /** True when a complete Firebase config is present. */
@@ -164,10 +190,12 @@ export class FirebaseAiAdapter implements ModelAdapter {
   readonly name = "firebase-ai-logic";
   private readonly app: FirebaseApp;
   private readonly ai: AI;
+  private readonly callTimeoutMs: number;
 
-  constructor(config: FirebaseOptions) {
+  constructor(config: FirebaseOptions, options: FirebaseAiAdapterOptions = {}) {
     this.app = getApps().length > 0 ? getApps()[0]! : initializeApp(config);
     this.ai = getAI(this.app, { backend: new GoogleAIBackend() });
+    this.callTimeoutMs = options.callTimeoutMs ?? MODEL_CALL_TIMEOUT_MS;
   }
 
   async analyze(claim: Claim): Promise<ModelOutput> {
@@ -181,7 +209,11 @@ export class FirebaseAiAdapter implements ModelAdapter {
         mode: InferenceMode.PREFER_ON_DEVICE,
         inCloudParams: { model: CLOUD_MODEL_ID },
       });
-      const result = await model.generateContent(buildClaimPrompt(claim.text));
+      const result = await withTimeout(
+        model.generateContent(buildClaimPrompt(claim.text)),
+        this.callTimeoutMs,
+        "Firebase AI Logic on-device generateContent",
+      );
       const ranInCloud = result.response.inferenceSource === "in_cloud";
       const source: ModelSource = ranInCloud ? "cloud" : "on-device";
       return parseModelResponse(
@@ -191,7 +223,10 @@ export class FirebaseAiAdapter implements ModelAdapter {
         ranInCloud ? CLOUD_MODEL_ID : ON_DEVICE_MODEL_ID,
       );
     } catch (err) {
-      // On-device unavailable or failed: escalate to cloud and record it.
+      // On-device unavailable, failed, or timed out: escalate to cloud
+      // and record it. (The escalation previously only ever fired on
+      // rejection; the timeout above is what makes a never-settling
+      // on-device attempt reach this path at all.)
       const out = await this.callCloud(claim);
       return {
         ...out,
@@ -201,12 +236,30 @@ export class FirebaseAiAdapter implements ModelAdapter {
   }
 
   private async callCloud(claim: Claim): Promise<ModelOutput> {
-    const model = getGenerativeModel(this.ai, {
-      mode: InferenceMode.ONLY_IN_CLOUD,
-      inCloudParams: { model: CLOUD_MODEL_ID },
-    });
-    const result = await model.generateContent(buildClaimPrompt(claim.text));
-    return parseModelResponse(result.response.text(), claim.id, "cloud", CLOUD_MODEL_ID);
+    try {
+      const model = getGenerativeModel(this.ai, {
+        mode: InferenceMode.ONLY_IN_CLOUD,
+        inCloudParams: { model: CLOUD_MODEL_ID },
+      });
+      const result = await withTimeout(
+        model.generateContent(buildClaimPrompt(claim.text)),
+        this.callTimeoutMs,
+        "Firebase AI Logic cloud generateContent",
+      );
+      return parseModelResponse(result.response.text(), claim.id, "cloud", CLOUD_MODEL_ID);
+    } catch (err) {
+      // Bounded and honest: a cloud call that times out or fails is
+      // recorded as model-unavailable, never waited on forever and
+      // never dressed up as a real model judgement.
+      return modelUnavailableOutput(
+        claim.id,
+        "cloud",
+        CLOUD_MODEL_ID,
+        isTimeoutError(err)
+          ? `cloud model call timed out after ${this.callTimeoutMs} ms`
+          : `cloud model call failed: ${errorMessage(err)}`,
+      );
+    }
   }
 }
 
@@ -217,11 +270,12 @@ export class FirebaseAiAdapter implements ModelAdapter {
  */
 export function createModelAdapter(
   config: FirebaseOptions | null = firebaseConfig,
+  adapterOptions: FirebaseAiAdapterOptions = {},
 ): { adapter: ModelAdapter; status: FirebaseRuntimeStatus } {
   const status = getFirebaseRuntimeStatus(config);
   if (status.mode === "firebase" && config) {
     try {
-      return { adapter: new FirebaseAiAdapter(config), status };
+      return { adapter: new FirebaseAiAdapter(config, adapterOptions), status };
     } catch (err) {
       return {
         adapter: new MockModelAdapter(),

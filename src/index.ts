@@ -17,11 +17,18 @@ export {
 export {
   MockModelAdapter,
   decideRoutingTier,
+  modelUnavailableOutput,
   type ModelAdapter,
   type RoutingDecision,
   type RoutingTier,
 } from "./modelAdapter.js";
-export { runProofGate, type EngineOptions } from "./engine.js";
+export {
+  runProofGate,
+  DEFAULT_MODEL_TIMEOUT_MS,
+  type EngineOptions,
+  type EngineProgressEvent,
+} from "./engine.js";
+export { withTimeout, TimeoutError, isTimeoutError } from "./timeout.js";
 export { SAMPLES, INVOICE_SAMPLE, SOURCE_TYPES, type SourceType } from "./samples.js";
 export {
   HISTORY_KEY,

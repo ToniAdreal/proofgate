@@ -6,7 +6,7 @@
  * minimal StorageLike interface) so it is unit-testable in Node and the
  * browser layer can pass window.localStorage directly.
  */
-import type { ProofReport, Verdict } from "./types.js";
+import type { ModelOutput, ProofReport, Verdict } from "./types.js";
 import type { SourceType } from "./samples.js";
 
 export interface StorageLike {
@@ -235,16 +235,28 @@ export function compareReplay(original: ProofReport, replayed: ProofReport): Rep
  * Honest label for how a report was processed, derived from the model
  * outputs actually recorded in the report. A report whose model pass ran
  * on the mock adapter is labelled demo mode; a report with no model pass
- * at all says so.
+ * at all says so. Outputs recorded with a `failure` (the model pass
+ * timed out or errored and produced no judgement) never count as a
+ * completed pass for their source: if every model output failed, the
+ * label says the model pass was unavailable; if only some failed, the
+ * label notes the partial unavailability.
  */
 export function processingModeLabel(report: ProofReport): string {
-  const sources = new Set(
-    report.claims.map((c) => c.modelOutput?.source).filter((s) => s !== undefined),
-  );
+  const outputs = report.claims
+    .map((c) => c.modelOutput)
+    .filter((o): o is ModelOutput => o !== null && o !== undefined);
+  const completed = outputs.filter((o) => !o.failure);
+  const failedCount = outputs.length - completed.length;
+  const sources = new Set(completed.map((o) => o.source));
   if (sources.has("mock")) return "Demo mode (mock model)";
-  if (sources.size === 0) return "Deterministic checks only";
+  if (completed.length === 0) {
+    return failedCount > 0
+      ? "Deterministic checks only (model pass unavailable)"
+      : "Deterministic checks only";
+  }
   const parts: string[] = [];
   if (sources.has("on-device")) parts.push("Gemini Nano first pass");
   if (sources.has("cloud")) parts.push("cloud escalation");
+  if (failedCount > 0) parts.push("model pass partly unavailable");
   return parts.join(" + ");
 }

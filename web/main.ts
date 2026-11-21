@@ -25,6 +25,7 @@ import {
   compareReplay,
   processingModeLabel,
   deriveReportTitle,
+  type EngineProgressEvent,
   type HistoryEntry,
   type ProofReport,
   type ReplayComparison,
@@ -44,6 +45,8 @@ interface AppState {
   sourceType: SourceType;
   inputText: string;
   running: boolean;
+  /** Visible run failure (engine-level), shown as a banner; null when none. */
+  error: string | null;
   pipeline: Array<"pending" | "in-progress" | "done">;
   currentReport: ProofReport | null;
   currentSourceType: SourceType;
@@ -61,6 +64,7 @@ const state: AppState = {
   sourceType: "Invoice",
   inputText: "",
   running: false,
+  error: null,
   pipeline: ["pending", "pending", "pending", "pending", "pending"],
   currentReport: null,
   currentSourceType: "Invoice",
@@ -144,7 +148,15 @@ function el<T extends HTMLElement>(selector: string): T {
   return node;
 }
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function errorBannerHtml(): string {
+  return state.error
+    ? `<div class="error-banner" role="alert"><strong>Something went wrong.</strong> ${esc(state.error)}</div>`
+    : "";
+}
 
 /* ------------------------------ actions ------------------------------ */
 
@@ -152,30 +164,75 @@ async function onVerify(): Promise<void> {
   const text = state.inputText;
   if (!text.trim() || state.running) return;
   state.running = true;
+  state.error = null;
   state.pipeline = ["in-progress", "pending", "pending", "pending", "pending"];
   renderScreen();
 
-  const run = runProofGate(text, { adapter });
-  // Advance the visible pipeline while the engine works.
-  for (let i = 0; i < PIPELINE_STEPS.length - 1; i++) {
-    await delay(160);
-    state.pipeline[i] = "done";
-    state.pipeline[i + 1] = "in-progress";
+  // Drive the visible pipeline from the engine's real progress events.
+  // (Steps used to advance on a fixed timer, which marked the model
+  // passes "Done" while a model call was still pending — forever, when
+  // the call never settled. Every engine await is bounded now, and the
+  // indicators only move when the work actually completes.)
+  let onDeviceLeft = 0;
+  let cloudLeft = 0;
+  const onProgress = (event: EngineProgressEvent): void => {
+    if (event.type === "split") {
+      state.pipeline[0] = "done";
+      state.pipeline[1] = "in-progress";
+    } else if (event.type === "checks-complete") {
+      onDeviceLeft = event.onDeviceClaims;
+      cloudLeft = event.cloudClaims;
+      state.pipeline[1] = "done";
+      state.pipeline[2] = onDeviceLeft > 0 ? "in-progress" : "done";
+      state.pipeline[3] =
+        cloudLeft > 0 ? (onDeviceLeft > 0 ? "pending" : "in-progress") : "done";
+      if (onDeviceLeft === 0 && cloudLeft === 0) state.pipeline[4] = "in-progress";
+    } else if (event.type === "model-claim-complete") {
+      if (event.tier === "on-device") {
+        onDeviceLeft = Math.max(0, onDeviceLeft - 1);
+        if (onDeviceLeft === 0) {
+          state.pipeline[2] = "done";
+          if (cloudLeft > 0) state.pipeline[3] = "in-progress";
+        }
+      } else if (event.tier === "cloud") {
+        cloudLeft = Math.max(0, cloudLeft - 1);
+        if (cloudLeft === 0) state.pipeline[3] = "done";
+      }
+    } else if (event.type === "model-complete") {
+      state.pipeline[2] = "done";
+      state.pipeline[3] = "done";
+      state.pipeline[4] = "in-progress";
+    }
     renderSidePanel();
+  };
+
+  try {
+    const report = await runProofGate(text, { adapter, onProgress });
+    state.pipeline = PIPELINE_STEPS.map(() => "done");
+    state.currentReport = report;
+    state.currentSourceType = state.sourceType;
+    state.reportReplay = null;
+    try {
+      state.history = addToHistory(
+        window.localStorage,
+        report,
+        state.sourceType,
+        new Date().toISOString(),
+      );
+    } catch {
+      // Persistence is best-effort: localStorage can be full or blocked,
+      // and history saving must never strand a completed report.
+    }
+    state.screen = "report";
+  } catch (err) {
+    // The engine records model failures per claim and resolves, so this
+    // only fires on a genuinely unexpected error — surface it visibly
+    // instead of leaving the pipeline spinning.
+    state.error = `Verification failed: ${errorMessage(err)}`;
+    state.pipeline = ["pending", "pending", "pending", "pending", "pending"];
+  } finally {
+    state.running = false;
   }
-  const report = await run;
-  state.pipeline = PIPELINE_STEPS.map(() => "done");
-  state.running = false;
-  state.currentReport = report;
-  state.currentSourceType = state.sourceType;
-  state.reportReplay = null;
-  state.history = addToHistory(
-    window.localStorage,
-    report,
-    state.sourceType,
-    new Date().toISOString(),
-  );
-  state.screen = "report";
   renderApp();
 }
 
@@ -185,34 +242,50 @@ async function replayAndCompare(report: ProofReport): Promise<ReplayComparison> 
 }
 
 function recordReplay(report: ProofReport, comparison: ReplayComparison): void {
-  const entry = state.history.find((e) => e.key === report.contentHash);
-  if (!entry) return;
-  state.history = updateHistoryEntry(window.localStorage, entry.key, {
-    replayCount: entry.replayCount + 1,
-    lastReplayAt: new Date().toISOString(),
-    lastReplayMatches: comparison.matches,
-  });
+  try {
+    const entry = state.history.find((e) => e.key === report.contentHash);
+    if (!entry) return;
+    state.history = updateHistoryEntry(window.localStorage, entry.key, {
+      replayCount: entry.replayCount + 1,
+      lastReplayAt: new Date().toISOString(),
+      lastReplayMatches: comparison.matches,
+    });
+  } catch {
+    // Best-effort bookkeeping only; a storage failure must not break replay.
+  }
 }
 
 async function onReplayCurrent(): Promise<void> {
   if (!state.currentReport || state.running) return;
   state.running = true;
+  state.error = null;
   renderScreen();
-  const comparison = await replayAndCompare(state.currentReport);
-  state.running = false;
-  state.reportReplay = comparison;
-  recordReplay(state.currentReport, comparison);
+  try {
+    const comparison = await replayAndCompare(state.currentReport);
+    state.reportReplay = comparison;
+    recordReplay(state.currentReport, comparison);
+  } catch (err) {
+    state.error = `Replay failed: ${errorMessage(err)}`;
+  } finally {
+    state.running = false;
+  }
   renderApp();
 }
 
 async function onReplayHistory(entry: HistoryEntry): Promise<void> {
   if (state.running) return;
   state.running = true;
+  state.error = null;
   renderScreen();
-  const comparison = await replayAndCompare(entry.report);
-  state.running = false;
-  state.historyReplay = { key: entry.key, title: entry.title, comparison };
-  recordReplay(entry.report, comparison);
+  try {
+    const comparison = await replayAndCompare(entry.report);
+    state.historyReplay = { key: entry.key, title: entry.title, comparison };
+    recordReplay(entry.report, comparison);
+  } catch (err) {
+    state.error = `Replay failed: ${errorMessage(err)}`;
+  } finally {
+    state.running = false;
+  }
   renderApp();
 }
 
@@ -344,6 +417,7 @@ function renderNewVerification(screen: HTMLElement): void {
       <h1>New Verification</h1>
       <p>Paste content to extract claims and verify before you trust.</p>
     </div>
+    ${errorBannerHtml()}
     ${
       status.mode === "mock"
         ? `<div class="demo-banner"><strong>Demo mode (mock model).</strong> ${esc(status.detail)}</div>`
@@ -442,7 +516,7 @@ function claimCard(cv: ProofReport["claims"][number]): string {
           <ul>${cv.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
           ${
             model
-              ? `<p style="margin:12px 0 0"><strong>Model pass</strong> (${esc(model.source)} · ${esc(model.modelId)}): ${esc(model.label)}, confidence ${model.confidence.toFixed(2)}.<br />${esc(model.rationale)}</p>`
+              ? `<p style="margin:12px 0 0"><strong>Model pass</strong> (${esc(model.source)} · ${esc(model.modelId)})${model.failure ? ` <span class="chip chip-fail">Unavailable</span>` : ""}: ${esc(model.label)}, confidence ${model.confidence.toFixed(2)}.<br />${esc(model.rationale)}</p>`
               : `<p style="margin:12px 0 0"><strong>Model pass:</strong> not run for this claim (deterministic-only routing).</p>`
           }
         </div>
@@ -492,6 +566,7 @@ function renderReport(screen: HTMLElement): void {
       <h1>Proof Report</h1>
       <p>Replayable verification results for the submitted content.</p>
     </div>
+    ${errorBannerHtml()}
     <div class="card">
       <div class="report-meta">
         <div><h3>${esc(deriveReportTitle(report))}</h3></div>
