@@ -225,3 +225,44 @@ What this does and does not show: no HTTP-level error was ever returned — noth
 - Live verification from the shell: GET https://toniadreal.github.io/proofgate/ → HTTP 200, HTML title "ProofGate — Verify before you trust", references /proofgate/assets/index-CfmRVFFS.js. GET that bundle → HTTP 200, 133,837 bytes, application/javascript. CSS bundle also HTTP 200.
 - Tests after the change: npm test 69 passed / 0 failed.
 - Note: Pages serves the same build that falls back to the labelled mock adapter unless the live Firebase path works in the visitor's browser; the Node-side live-smoke timeout (phase 3b) is unchanged by this phase. Browser-side live verification is the next step.
+
+## Phase 5 — verification hang fixed: bounded model awaits, honest unavailable outcomes (2026-11-20)
+
+### Symptom (verified twice in the user's real Chrome on the live Pages build)
+App loads in live Firebase mode (header pill "FIREBASE AI LOGIC CONNECTED", no mock labels). Running the invoice sample flips pipeline steps 1–4 to "Done" within seconds, then step 5 "Generate Proof Report" stays "In progress" forever (5+ minutes): no verdict, no report, no error anywhere.
+
+### Root cause (with evidence)
+The run's only real await was an unbounded model call, and the step indicators masked where it was stuck:
+
+- `web/main.ts` `onVerify()` advanced steps 1–4 with a fixed 160 ms timer loop, decoupled from the engine — they showed "Done" regardless of actual work. Step 5 completed only when the single `await runProofGate(...)` resolved. `onVerify` also had no try/catch: even a rejection would have stranded the UI (`running` stuck true, no error shown).
+- `src/engine.ts` awaited `adapter.analyze(claim)` per claim, sequentially, with no timeout and no error handling. For the invoice sample exactly one claim routes to the model ("Design services: 3 units at $2,800 = $9,400.", on-device tier), so one stuck call blocked the whole run — the deterministic arithmetic FAIL was computed but could never surface, because the report is built only after all model calls settle.
+- `src/firebaseAi.ts` awaited `model.generateContent(...)` bare (hybrid call and cloud call). No timeout, no AbortController anywhere in the chain. The on-device → cloud escalation only fires on *rejection*; a promise that never settles never triggers it.
+
+Why generateContent never settles against project proofgate-f1e4d (narrowed, evidence-ranked):
+1. The cloud request path stalls server-side. The phase 3/3b Node smoke reproduced non-settlement on the ONLY_IN_CLOUD path too (raw SDK calls hit the script's own 60 s race; adapter calls died with an internal `AbortError: Timeout has expired`), while plain HTTPS GETs to the same Google hosts answered in ~2 s. So: not Chrome-specific, not on-device-specific, not general egress. The project's App Check shows "Unregistered", so the SDK sends no attestation token — a backend that expects one can stall rather than fail fast. No HTTP error was ever returned, so this cannot be distinguished client-side from a backend provisioning stall; it remains the leading server-side candidate, unproven.
+2. In Chrome the hybrid path can additionally pend inside the SDK: the bundled @firebase/ai 13.4.0 code awaits `LanguageModel.create()` to get "a promise for when the download completes" when Gemini Nano availability is DOWNLOADABLE/DOWNLOADING, with no deadline — a Chrome-managed model download can pend indefinitely on top of (1).
+3. Nothing in the stack gives up on its own: the SDK bundle has no retry/backoff and no overall generateContent deadline (grep-verified).
+
+Ruled out: Firestore — zero Firestore imports/calls in `src/` and `web/` (only a doc comment in types.ts); persistence is synchronous localStorage (`src/history.ts`), so the project never having Firestore enabled is irrelevant and persistence could not block report generation. Report sealing (pure synchronous SHA-256) and the deterministic validators (pure sync functions) cannot hang.
+
+### Fix (commit 91e89fc on main)
+- `src/timeout.ts` (new): `withTimeout` / `TimeoutError` / `isTimeoutError`. Promise.race keeps a handler on the underlying promise, so late rejections are never unhandled.
+- `src/engine.ts`: restructured into a checks phase + model phase (same inputs to the gate; outputs unchanged on the mock path — see hash check below). Every `adapter.analyze` is bounded by `modelTimeoutMs` (new EngineOptions field, default `DEFAULT_MODEL_TIMEOUT_MS` = 90 s, above the adapter's own worst case). Timeout or adapter throw → `modelUnavailableOutput`: label `uncertain`, confidence 0, `failure` field set, rationale stating no model judgement was obtained. The engine emits real progress events (`EngineProgressEvent`: split / checks-complete with per-tier claim counts / model-claim-complete / model-complete / report-built).
+- `src/firebaseAi.ts`: each generateContent call bounded at `MODEL_CALL_TIMEOUT_MS` = 30 s (configurable via `FirebaseAiAdapterOptions.callTimeoutMs`, threaded through `createModelAdapter`). On-device timeout now reaches the escalation path; a failed/timed-out cloud call returns the model-unavailable output instead of rejecting or hanging. `ModelOutput` gained an optional `failure?: string` (types.ts); `modelUnavailableOutput` lives in modelAdapter.ts.
+- `src/history.ts`: `processingModeLabel` no longer counts failed outputs as a completed pass for their source — all-failed reports read "Deterministic checks only (model pass unavailable)"; partial failures append "model pass partly unavailable". Existing labels for mock / model-free / fully-live reports are unchanged.
+- `web/main.ts`: pipeline indicators are driven by the engine's progress events (the cosmetic timer loop is deleted); `onVerify` and both replay handlers catch unexpected errors into a visible error banner (new `.error-banner` style); claim cards show an "Unavailable" chip on failed model passes; history persistence is wrapped as best-effort so a localStorage failure can never strand a completed report.
+
+### Verification (exact results)
+- `npm test`: **79 passed / 0 failed** (45 core + 24 UI-logic + 10 new in `tests/model-timeout.test.ts`). New regression tests: never-resolving adapter (the hang itself) — invoice run completes fast with the deterministic FAIL surfaced and the model pass recorded as timed-out/uncertain; clean claim with unavailable model is NEEDS REVIEW, never a silent PASS; cloud-routed claim records the failure against the cloud source; throwing adapter cannot break the run; slow-but-in-bound adapter is used normally; progress-event sequence; `FirebaseAiAdapter` against a fake config with a 50 ms call bound resolves with a recorded failure instead of hanging.
+- `npm run typecheck`: clean. `npm run build` (tsc): clean.
+- Behaviour-drift check: `node make-sample.mjs` against the new dist build reproduced `sample-proof-report.json` with the unchanged contentHash `db5ccba427cb053320569cffd957c0c537fa6292978381c486d0bb1a21959748` (git diff on the file: none) — the deterministic/demo path is byte-identical.
+- `npm run build:web` and `npm run build:pages`: both succeed; new JS bundle `index-BV3SVOAu.js` (136.88 kB, gzip 35.79 kB), CSS `index-DbGxF6KG.css`.
+
+### Redeploy
+- main: `91e89fc` pushed to https://github.com/ToniAdreal/proofgate.
+- gh-pages: `f8e9d15` pushed (built output only). Live verification by curl: GET https://toniadreal.github.io/proofgate/ → HTTP 200 and the HTML now references `/proofgate/assets/index-BV3SVOAu.js` (previous build referenced `index-CfmRVFFS.js`); GET that bundle → HTTP 200, 136,935 bytes.
+
+### What remains
+- Browser-side re-test in the user's Chrome (main agent): with the live backend still stalling, a run should now complete within the bounded worst case (~30 s on-device timeout + ~30 s cloud timeout for the invoice sample's single model claim) and produce a sealed report whose model pass is honestly marked unavailable — instead of spinning forever. If the backend starts answering, the same build records real on-device/cloud outputs with no code change.
+- The server-side stall itself (App Check "Unregistered" is the leading candidate) is a console-side investigation: register an App Check provider (reCAPTCHA) for the web app per SPEC Section 7, then re-run `node scripts/live-smoke.mjs`.
+- Firestore persistence of reports; demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
