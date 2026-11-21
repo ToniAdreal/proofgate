@@ -302,3 +302,32 @@ The phase 5 Chrome re-test showed the hang was fixed (run completes, determinist
 ### What remains
 - The debug token must also be registered in the Firebase console for project proofgate-f1e4d (App Check → ProofGate Web app → debug tokens) — a console-side step for the main agent; only then can the Chrome re-test confirm model calls return real on-device/cloud outputs instead of the 401. If the token is not registered, the same build keeps degrading honestly to "model pass unavailable".
 - Firestore persistence of reports; demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
+
+## Phase 7 — Cloud model updated (gemini-2.5-flash retired) + header lockup at proper size (2026-11-20)
+
+### Evidence that drove this phase
+The phase 6 Chrome re-test (2026-11-20 17:21 PST) showed App Check now passes (the 401 is gone), but the cloud model call fails with `[404] "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements."` (endpoint firebasevertexai.googleapis.com, project proofgate-f1e4d). Separately, the user reported the top-left header logo on the live page renders too small and not fully displayed.
+
+### Cloud model update (commit 7a87f6e on main)
+- `src/firebase-config.ts`: new named, configurable constant `cloudModel = "gemini-3.8-flash"` — exactly the model ID the API error prescribes — placed next to the other live project settings (web config, App Check debug token), with the retirement history documented in the comment. The value is the bare model ID with no "models/" prefix, the same convention the previous value used in the SDK's `ModelParams.model`.
+- `src/firebaseAi.ts`: `CLOUD_MODEL_ID` is now an alias of `cloudModel` from firebase-config.ts, so the adapter's three use sites (hybrid `inCloudParams`, ONLY_IN_CLOUD `inCloudParams`, recorded `modelId`) and `scripts/live-smoke.mjs`'s import are unchanged. Repo sweep for stale references: the only other "gemini-2.5" hit is the phase 6 entry above, a dated evidence record of the 401 as observed at the time — left as written (history is not live configuration). SPEC.md, README, and tests name no live model (tests/ui-logic.test.ts passes a dummy "gemini" string to parseModelResponse; untouched).
+- On-device path checked and deliberately unchanged: the adapter passes no model name for on-device inference, and @firebase/ai's `OnDeviceParams` (verified in the bundled ai-public.d.ts) has no model field — only Prompt API `createOptions`/`promptOptions` — so Chrome's built-in Gemini Nano is selected by the SDK/browser. `ON_DEVICE_MODEL_ID` remains a reporting label, and its comment now says so.
+
+### Header lockup fix (commit 6ada361 on main)
+- Root cause was the asset's canvas, not the CSS rule: `public/logo-lockup.png` was 1448×1086, but the actual artwork (shield + "ProofGate" wordmark) occupies only a 1297×405 band centered in it (measured content bbox (78,338)–(1375,743)). With `.topbar .lockup { height: 40px }` sizing the whole padded canvas, the logo itself rendered ~15px tall inside a near-square 53×40px box — the user's "too small, not fully displayed".
+- Fix: `public/logo-lockup.png` trimmed to the artwork (1345×453, 24px padding retained, aspect preserved; `brand/logo-lockup.png` keeps the pristine original), and `.topbar .lockup` height set to **42px** (width auto), so the lockup now renders ~125×42px in the existing 64px topbar — no container change needed, nothing clipped.
+- Duplicate-wordmark check: the image is the full lockup (icon + wordmark baked in), and the header markup (`renderApp` in web/main.ts) contains no separate text title beside it — only the `<img>`, the spacer, and the status chip. The "ProofGate" text seen next to the logo in the earlier user screenshot was the img's `alt` fallback during the phase 5 404, already fixed in phase 6. Nothing to remove.
+
+### Verification (exact results)
+- `npm test`: **84 passed / 0 failed** (unchanged count; no test pinned the old model name).
+- `npm run typecheck`: clean. `npm run build` (tsc): clean.
+- Behaviour-drift check: `node make-sample.mjs` reproduced `sample-proof-report.json` byte-identical, contentHash unchanged at `db5ccba427cb053320569cffd957c0c537fa6292978381c486d0bb1a21959748` — the deterministic/demo path is untouched.
+- `npm run build:web` and `npm run build:pages`: both succeed. New JS bundle `index-DOq85xKb.js` (grep-verified: contains "gemini-3.8-flash" ×1, "gemini-2.5-flash" ×0), CSS `index-QyOvuY7L.css`. The trimmed lockup (372,787 bytes) is in the pages output.
+
+### Redeploy
+- main: `7a87f6e` (cloud model) and `6ada361` (lockup) pushed to https://github.com/ToniAdreal/proofgate.
+- gh-pages: `fa8b075` (phase 7 build). Live verification by curl (after a short Pages propagation lag during which the old HTML still referenced the previous bundle): GET https://toniadreal.github.io/proofgate/ → HTTP 200, HTML references `/proofgate/assets/index-DOq85xKb.js` (previous build: `index-BzmDGUmB.js`); GET that bundle → HTTP 200, 159,531 bytes; GET the new CSS → HTTP 200; GET https://toniadreal.github.io/proofgate/logo-lockup.png → HTTP 200, `image/png`, 372,787 bytes (the trimmed asset).
+
+### What remains
+- Browser-side re-test in the user's Chrome (main agent): with App Check passing and the cloud model now gemini-3.8-flash, a run should record a real cloud model judgement (and on-device where Chrome provides Nano) instead of the 404/unavailable outcome.
+- Firestore persistence of reports; demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
