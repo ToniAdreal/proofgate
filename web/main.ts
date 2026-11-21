@@ -38,6 +38,16 @@ import { createModelAdapter } from "../src/firebaseAi.js";
 
 const { adapter, status } = createModelAdapter();
 
+/**
+ * Base-aware URL of the header lockup (a public/ asset). A
+ * root-absolute "/logo-lockup.png" breaks on the GitHub Pages
+ * deployment, whose base is /proofgate/ (the browser resolves it
+ * against the domain root and gets a 404); import.meta.env.BASE_URL
+ * carries the base of the current build ("/" for build:web,
+ * "/proofgate/" for build:pages).
+ */
+const LOCKUP_URL = `${import.meta.env.BASE_URL}logo-lockup.png`;
+
 type Screen = "new" | "report" | "history";
 
 interface AppState {
@@ -305,7 +315,7 @@ function renderApp(): void {
   const app = el<HTMLDivElement>("#app");
   app.innerHTML = `
     <header class="topbar">
-      <img class="lockup" src="/logo-lockup.png" alt="ProofGate" />
+      <img class="lockup" src="${LOCKUP_URL}" alt="ProofGate" />
       <div class="spacer"></div>
       ${
         status.mode === "mock"

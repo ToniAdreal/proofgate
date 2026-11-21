@@ -148,6 +148,8 @@ h3 { font-size: 20px; line-height: 28px; font-weight: 700; margin: 0; }
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   gap: 8px;
 }
 .btn:hover { border-color: var(--border-strong); }
@@ -182,6 +184,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   color: var(--text-2);
   font: 500 14px/20px var(--font);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 .seg-btn.active {
   background: var(--tint);
@@ -469,6 +475,7 @@ table.history-table {
 .history-table .row-sub { color: var(--text-3); font-size: 12px; line-height: 16px; max-width: 300px; }
 .verdict-counts { display: flex; gap: 6px; flex-wrap: wrap; }
 .row-actions { display: flex; gap: 8px; align-items: center; }
+.row-actions .btn { flex-shrink: 0; }
 
 .empty-state {
   text-align: center;
