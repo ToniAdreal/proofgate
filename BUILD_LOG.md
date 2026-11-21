@@ -266,3 +266,39 @@ Ruled out: Firestore — zero Firestore imports/calls in `src/` and `web/` (only
 - Browser-side re-test in the user's Chrome (main agent): with the live backend still stalling, a run should now complete within the bounded worst case (~30 s on-device timeout + ~30 s cloud timeout for the invoice sample's single model claim) and produce a sealed report whose model pass is honestly marked unavailable — instead of spinning forever. If the backend starts answering, the same build records real on-device/cloud outputs with no code change.
 - The server-side stall itself (App Check "Unregistered" is the leading candidate) is a console-side investigation: register an App Check provider (reCAPTCHA) for the web app per SPEC Section 7, then re-run `node scripts/live-smoke.mjs`.
 - Firestore persistence of reports; demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
+
+## Phase 6 — App Check debug token wired; pill + report honesty; logo and button fixes (2026-11-20)
+
+### Evidence that drove this phase
+The phase 5 Chrome re-test showed the hang was fixed (run completes, deterministic FAIL surfaces, sealed report produced), but every model call failed with `[401] Firebase App Check token is invalid` (endpoint firebasevertexai.googleapis.com, model gemini-2.5-flash). Project `proofgate-f1e4d` had App Check "Unregistered": no attestation provider and no debug token, so the SDK sent a token the backend rejects. The #BuildHybridAI rules accept App Check debug tokens for demos. Separately, the user screenshotted the live History & Replay page and flagged a broken header logo and a misaligned "Replay" action button.
+
+### App Check debug token (commit b692b16 on main)
+- `src/firebase-config.ts`: new exported `appCheckDebugToken` — the debug token registered for the ProofGate Web app in the Firebase console. Documented in code as what it is: a debug token is an identifier that ships in the client bundle by design (same category as the web config), not a credential; it grants no access by itself.
+- `src/firebaseAi.ts`: new `ensureAppCheck(app, debugToken?)`, called from the `FirebaseAiAdapter` constructor before `getAI(...)`, so App Check exists before the first AI Logic call. It sets the global `FIREBASE_APPCHECK_DEBUG_TOKEN` to the configured token string first, then calls `initializeAppCheck(app, { provider, isTokenAutoRefreshEnabled: true })`. Provider choice: a `CustomProvider` whose `getToken` always rejects. Reason, verified in the bundled @firebase/app-check 0.13.2 source: when the debug-token global holds a string, token requests go to the debug-token exchange endpoint and the configured provider is never consulted — so the provider makes no network calls, needs no reCAPTCHA site key, and if the debug global were somehow absent its rejection degrades to the existing honest model-unavailable outcome instead of a crash or hang. The outcome is recorded on the adapter as `appCheckInit`.
+- Guarding: browser-only (skips when there is no `window`, checked via `globalThis` so the Node-oriented tsconfig needs no DOM lib); skips when no debug token is configured; a WeakSet makes repeat calls for the same app no-ops (the SDK throws on a second `initializeAppCheck`); any throw is captured into the returned status, never propagated. Node, tests, the live-smoke script, and the mock/deterministic path are therefore untouched.
+
+### Honesty / completeness UI fixes (same commit)
+- Header pill: "Firebase AI Logic connected" → "Firebase AI Logic configured". "Connected" overclaimed: what is known is that a config is present; the re-test proved model calls could still fail. The banner text (`status.detail`) already read "Firebase configured. …" and is unchanged.
+- Proof Report view now displays the report's full SHA-256 `contentHash` (monospace, small) under the seal chip; previously only the "Seal verified (SHA-256)" label and the report id were shown, never the hash value itself.
+
+### Logo fix (commit 64d9738 on main)
+- Root cause: wrong path, not a missing file. `public/logo-lockup.png` exists and was present in the build:pages output all along (`dist-pages/logo-lockup.png`), but `web/main.ts` referenced it root-absolute (`src="/logo-lockup.png"`). On the Pages deployment (base `/proofgate/`) the browser resolves that against the domain root — curl-verified: `https://toniadreal.github.io/logo-lockup.png` → 404, while `https://toniadreal.github.io/proofgate/logo-lockup.png` → 200 image/png. (The favicon in index.html was fine: Vite rebases it to `/proofgate/logo-icon.png` in the pages build; only the runtime-generated `<img>` string was wrong.)
+- Fix: the header `<img>` now uses `${import.meta.env.BASE_URL}logo-lockup.png` (a `LOCKUP_URL` const in web/main.ts), so the URL follows the build base — `/logo-lockup.png` for build:web, `/proofgate/logo-lockup.png` for build:pages. Both bundles grep-verified to contain the right string.
+
+### Button alignment fix (same commit)
+- Symptom: in the History table's ACTIONS column, the "Replay" button rendered its ▶ icon stacked above the "Replay" label (two lines, overflowing the fixed-height button) while View/Delete stayed on one line. Cause: `.btn` was `inline-flex` with `align-items: center` but no `white-space: nowrap`, so when the table cell constrained the button's width, its text wrapped at the space after the icon glyph.
+- Changes (alignment only, no redesign): `.btn` gains `justify-content: center` and `white-space: nowrap`; `.row-actions .btn` gains `flex-shrink: 0` so the action buttons cannot be shrunk below content width; `.seg-btn` (segmented source-type control) gains the same `inline-flex` / `align-items: center` / `justify-content: center` / `white-space: nowrap` treatment. Sweep result: the Verify and Export/Replay buttons share `.btn` and are covered; sidebar `.nav-item` was already flex with centered items and single-line content; filter/search inputs and selects carry no icon+label content.
+
+### Verification (exact results)
+- `npm test`: **84 passed / 0 failed** (45 core + 24 UI-logic + 10 model-timeout + **5 new** in `tests/app-check.test.ts`: debug-token shape, config intact, Node guarding — skips without setting the global, repeat-safe, adapter records the skipped outcome).
+- `npm run typecheck`: clean. `npm run build` (tsc): clean.
+- Behaviour-drift check: `node make-sample.mjs` reproduced `sample-proof-report.json` byte-identical, contentHash unchanged at `db5ccba427cb053320569cffd957c0c537fa6292978381c486d0bb1a21959748` — the deterministic/demo path is untouched.
+- `npm run build:web` and `npm run build:pages`: both succeed. Final JS bundle `index-BzmDGUmB.js` (159.47 kB, gzip 40.48 kB), CSS `index-AhZsEFd5.css`.
+
+### Redeploy
+- main: `b692b16` (App Check + pill + hash) and `64d9738` (logo + buttons) pushed to https://github.com/ToniAdreal/proofgate.
+- gh-pages: `9dd2f37` (first phase 6 build, bundle `index-CXMsvAtT.js`), then `31f04a9` (final build with both UI fixes). Live verification by curl: GET https://toniadreal.github.io/proofgate/ → HTTP 200 and the HTML references `/proofgate/assets/index-BzmDGUmB.js` (previous phase 6 build referenced `index-CXMsvAtT.js`; phase 5 referenced `index-BV3SVOAu.js`); GET that bundle → HTTP 200, 159,525 bytes; GET the new CSS → HTTP 200; GET https://toniadreal.github.io/proofgate/logo-lockup.png → HTTP 200, `image/png`, 1,052,674 bytes.
+
+### What remains
+- The debug token must also be registered in the Firebase console for project proofgate-f1e4d (App Check → ProofGate Web app → debug tokens) — a console-side step for the main agent; only then can the Chrome re-test confirm model calls return real on-device/cloud outputs instead of the 401. If the token is not registered, the same build keeps degrading honestly to "model pass unavailable".
+- Firestore persistence of reports; demo video and Devpost submission ahead of the 2026-11-30 14:00 PT deadline.
